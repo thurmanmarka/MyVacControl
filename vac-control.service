@@ -1,0 +1,27 @@
+[Unit]
+Description=MyVacControl - iHome AutoVac robot vacuum over the LAN
+After=network-online.target mariadb.service
+Wants=network-online.target mariadb.service
+
+[Service]
+Type=simple
+User=myhomeservices
+Group=myhomeservices
+WorkingDirectory=/home/myhomeservices/vac-control
+ExecStart=/home/myhomeservices/vac-control/vac-control
+Restart=on-failure
+RestartSec=5s
+
+# Security hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=read-only
+
+# Logging (commands and cleans also go to the database)
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vac-control
+
+[Install]
+WantedBy=multi-user.target

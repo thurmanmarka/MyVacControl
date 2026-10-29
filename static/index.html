@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vacuum Control — My Home Services Hub</title>
+    <style>
+        :root {
+            --page-bg: #f5f7fb;
+            --panel-bg: #ffffff;
+            --panel-border: #d2d7e0;
+            --accent: #2563eb;
+            --accent-soft: #e0edff;
+            --text-main: #1f2933;
+            --text-muted: #6b7280;
+            --ok: #15803d;
+            --bad: #b91c1c;
+            --warn: #b45309;
+            --gradient-start: #d9e6ff;
+            --gradient-mid1: #e7edf4;
+            --gradient-mid2: #dde7f4;
+            --gradient-end: #d3e0f0;
+        }
+
+        [data-theme="dark"] {
+            --page-bg: #1e293b;
+            --panel-bg: #334155;
+            --panel-border: #475569;
+            --accent: #3b82f6;
+            --accent-soft: #1e3a8a;
+            --text-main: #f1f5f9;
+            --text-muted: #94a3b8;
+            --ok: #4ade80;
+            --bad: #f87171;
+            --warn: #fbbf24;
+            --gradient-start: #1e293b;
+            --gradient-mid1: #0f172a;
+            --gradient-mid2: #1e293b;
+            --gradient-end: #334155;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            background: radial-gradient(circle at top left, var(--gradient-start), var(--gradient-mid1) 40%, var(--gradient-mid2) 70%, var(--gradient-end) 100%);
+            color: var(--text-main);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            padding: 32px 16px;
+        }
+
+        .page-shell {
+            max-width: 1000px;
+            width: 100%;
+            background: var(--page-bg);
+            border-radius: 12px;
+            box-shadow: 0 18px 45px rgba(15, 23, 42, 0.16), 0 0 0 1px rgba(15, 23, 42, 0.03);
+            padding: 28px;
+        }
+
+        .top-bar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 24px; }
+        .top-bar-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+        h1 { font-size: 1.6rem; }
+
+        .panel {
+            background: var(--panel-bg);
+            border: 1px solid var(--panel-border);
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .panel-title { font-weight: 600; font-size: 1.05rem; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+        .muted { color: var(--text-muted); font-size: 0.9rem; font-weight: 400; }
+
+        .btn, .back-btn, .theme-toggle, select, input {
+            font: inherit;
+            border-radius: 8px;
+            border: 1px solid var(--panel-border);
+            background: var(--panel-bg);
+            color: var(--text-main);
+            padding: 8px 12px;
+        }
+        .btn { cursor: pointer; background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 500; }
+        .btn.secondary { background: var(--accent-soft); color: var(--text-main); border-color: var(--panel-border); }
+        .btn.danger { background: none; color: var(--bad); border-color: var(--panel-border); }
+        .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+        .btn.small { padding: 4px 10px; font-size: 0.8rem; }
+        .back-btn { text-decoration: none; }
+        .theme-toggle { cursor: pointer; }
+
+        .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+        .stat { background: var(--accent-soft); border-radius: 8px; padding: 12px; }
+        .stat .k { font-size: 0.8rem; color: var(--text-muted); }
+        .stat .v { font-size: 1.15rem; font-weight: 600; margin-top: 4px; }
+        .stat .v.ok { color: var(--ok); }
+        .stat .v.bad { color: var(--bad); }
+        .stat .v.warn { color: var(--warn); }
+        .battery-bar { height: 6px; border-radius: 3px; background: var(--panel-border); margin-top: 8px; overflow: hidden; }
+        .battery-bar div { height: 100%; background: var(--ok); }
+        .battery-bar div.low { background: var(--bad); }
+
+        .controls { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 18px; }
+        .controls .btn { min-width: 7.5em; }
+        .controls .sep { flex: 0 0 1px; align-self: stretch; background: var(--panel-border); margin: 0 4px; }
+        label { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; color: var(--text-muted); }
+        label select, label input { color: var(--text-main); }
+
+        .msg { margin-top: 12px; font-weight: 500; min-height: 1.2em; }
+        .msg.ok { color: var(--ok); }
+        .msg.bad { color: var(--bad); }
+        .hidden { display: none !important; }
+
+        .table-wrap { overflow-x: auto; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+        th { text-align: left; font-size: 0.8rem; font-weight: 600; color: var(--text-muted); padding: 6px 8px; border-bottom: 1px solid var(--panel-border); white-space: nowrap; }
+        td { padding: 8px; border-bottom: 1px solid var(--panel-border); vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        td.nowrap { white-space: nowrap; }
+        .sub { font-size: 0.78rem; color: var(--text-muted); }
+        .result-ok { color: var(--ok); font-weight: 600; }
+        .result-bad { color: var(--bad); font-weight: 600; }
+        .empty { color: var(--text-muted); padding: 8px 0; }
+
+        .sched-form { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 12px; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--panel-border); }
+        .days { display: flex; gap: 6px; flex-wrap: wrap; grid-column: 1 / -1; }
+        .days label { flex-direction: row; align-items: center; gap: 4px; background: var(--accent-soft); border-radius: 6px; padding: 4px 8px; cursor: pointer; color: var(--text-main); }
+        .sched-form .actions { grid-column: 1 / -1; display: flex; gap: 10px; }
+        @media (max-width: 700px) { .sched-form { grid-template-columns: 1fr 1fr; } }
+
+        .tabs { display: flex; gap: 6px; }
+        .tabs button { font: inherit; font-size: 0.85rem; border: 1px solid var(--panel-border); background: none; color: var(--text-muted); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
+        .tabs button.active { background: var(--accent-soft); color: var(--text-main); }
+    </style>
+</head>
+<body>
+    <div class="page-shell">
+        <div class="top-bar">
+            <h1>🤖 Vacuum Control</h1>
+            <div class="top-bar-right">
+                <select id="vacSelect" aria-label="Vacuum"></select>
+                <a href="/" class="back-btn">🏠 Home</a>
+                <button class="theme-toggle" id="themeToggle" title="Toggle dark mode">🌙</button>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-title">
+                <span>Status <span class="muted" id="seenNote"></span></span>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="k">State</div><div class="v" id="stState">—</div></div>
+                <div class="stat"><div class="k">Battery</div><div class="v" id="stBattery">—</div><div class="battery-bar"><div id="stBatteryBar" style="width:0"></div></div></div>
+                <div class="stat"><div class="k">Mode</div><div class="v" id="stMode">—</div></div>
+                <div class="stat"><div class="k">Suction</div><div class="v" id="stSuction">—</div></div>
+                <div class="stat"><div class="k">This clean</div><div class="v" id="stRun">—</div></div>
+            </div>
+
+            <div class="controls">
+                <label>Mode
+                    <select id="modeSelect"></select>
+                </label>
+                <button class="btn" id="playBtn">▶ Start</button>
+                <button class="btn secondary" id="homeBtn">🏠 Home</button>
+                <span class="sep"></span>
+                <label id="suctionWrap">Suction
+                    <select id="suctionSelect"></select>
+                </label>
+                <button class="btn secondary" id="locateBtn">🔔 Locate</button>
+            </div>
+            <div id="ctlMsg" class="msg"></div>
+        </div>
+
+        <div class="panel" id="schedPanel">
+            <div class="panel-title">
+                <span>Schedules <span class="muted" id="tzNote"></span></span>
+                <button class="btn secondary" id="newSchedBtn">＋ Add schedule</button>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Name</th><th>When</th><th>Mode</th><th>Last run</th><th>On</th><th></th></tr></thead>
+                    <tbody id="schedRows"></tbody>
+                </table>
+            </div>
+            <form id="schedForm" class="sched-form hidden">
+                <label>Name <input id="sfName" maxlength="64" placeholder="e.g. Weekday morning"></label>
+                <label>Time <input id="sfAt" type="time" required></label>
+                <label>Mode <select id="sfMode"></select></label>
+                <label>Suction <select id="sfSuction"></select></label>
+                <div class="days" id="sfDays"></div>
+                <div class="actions">
+                    <button class="btn" type="submit" id="sfSave">Save</button>
+                    <button class="btn secondary" type="button" id="sfCancel">Cancel</button>
+                </div>
+            </form>
+            <div id="schedMsg" class="msg"></div>
+        </div>
+
+        <div class="panel" id="historyPanel">
+            <div class="panel-title">
+                <span>History</span>
+                <span class="tabs">
+                    <button id="tabCleans" class="active">Cleans</button>
+                    <button id="tabCommands">Commands</button>
+                </span>
+            </div>
+            <div class="table-wrap" id="cleansWrap">
+                <table>
+                    <thead><tr><th>Started</th><th>Length</th><th>Mode</th><th>Area</th><th>Battery</th><th>Started by</th><th>Ended</th></tr></thead>
+                    <tbody id="cleanRows"></tbody>
+                </table>
+            </div>
+            <div class="table-wrap hidden" id="commandsWrap">
+                <table>
+                    <thead><tr><th>When</th><th>Who</th><th>What</th><th>Result</th></tr></thead>
+                    <tbody id="commandRows"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <div class="panel hidden" id="noDbPanel">
+            <div class="muted">Schedules and history need the database: set <code>database.enabled: true</code> in config.yaml.</div>
+        </div>
+    </div>
+
+    <script>
+        const themeToggle = document.getElementById('themeToggle');
+        if ((localStorage.getItem('theme') || 'light') === 'dark') {
+            document.documentElement.setAttribute('data-theme', 'dark');
+            themeToggle.textContent = '☀️';
+        }
+        themeToggle.addEventListener('click', () => {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            document.documentElement.setAttribute('data-theme', isDark ? 'light' : 'dark');
+            localStorage.setItem('theme', isDark ? 'light' : 'dark');
+            themeToggle.textContent = isDark ? '🌙' : '☀️';
+        });
+    </script>
+    <script>
+        // Behind the hub everything lives under /vac; the hub's own /static/ belongs to the weather app.
+        window.BASE_PATH = window.location.pathname.startsWith('/vac') ? '/vac' : '';
+        const script = document.createElement('script');
+        script.src = window.BASE_PATH + '/static/app.js';
+        document.body.appendChild(script);
+    </script>
+</body>
+</html>

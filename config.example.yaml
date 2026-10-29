@@ -1,0 +1,68 @@
+# MyVacControl configuration
+# Copy to config.yaml and fill in your vacuum's details. config.yaml holds the
+# vacuum's local key and the database password, so it is git-ignored; keep it
+# chmod 600.
+
+server:
+  port: 8085
+  # Keep this on 127.0.0.1: the service trusts the hub's X-Hub-Role header,
+  # so it must only be reachable through MyHomeServicesHub.
+  bind: 127.0.0.1
+  # true = requests that bypass the hub are treated as admin (local testing only)
+  allow_direct: false
+
+# MariaDB: clean history, the command log and schedules. Without it the
+# vacuum can still be controlled, but nothing is remembered and schedules are off.
+database:
+  enabled: true
+  host: 127.0.0.1
+  port: 3306
+  name: vac_db
+  user: vac_app
+  password: "change-me"
+
+vacuums:
+  - id: autovac
+    name: AutoVac
+    # Give the vacuum a DHCP reservation so this doesn't change.
+    # ./vac-control -discover prints its IP, device id and protocol version
+    # (it has to run on the same network or VLAN as the vacuum).
+    host: 172.16.32.246
+    # From the Tuya IoT platform (see README). Re-pairing the vacuum in its
+    # app generates a new local key, and this one stops working.
+    device_id: "xxxxxxxxxxxxxxxxxxxxxx"
+    local_key: "xxxxxxxxxxxxxxxx"
+    version: "3.3"
+    # eclipse (iHRV1/iHRV2) or nova. Sets the data points, modes, suction
+    # levels and dock/stop modes below; anything set here overrides it.
+    model: eclipse
+
+    # Which Tuya data point does what (./vac-control -dump autovac shows what
+    # yours reports). If you set dps at all, list every one: missing ones count
+    # as 0 (absent). The Eclipse's:
+    # dps:
+    #   power: 1
+    #   mode: 25        # smart, wallfollow, sprial, single, mop, chargego (dock), idle (stop)
+    #   status: 38      # a bare code "0".."8" (see status_labels below)
+    #   battery: 39
+    #   suction: 27     # ECO, normal, strong
+    #   error: 11       # fault bitmap
+    #   area: 41        # m² this clean
+    #   clean_time: 42  # minutes this clean
+    # modes: [smart, wallfollow, sprial, single, mop]   # the first is Start's default
+    # suction: [ECO, normal, strong]
+    # dock_mode: chargego
+    # stop_mode: idle
+    # Its start switch (33) is ignored over the LAN, so pause and stop halt it
+    # where it is (status 0) and resume sends the clean's mode again:
+    # pause: {"26": "stop"}
+    # stop: {"26": "stop"}
+
+    # What the status codes mean. These are the Eclipse's as seen on an iHRV2;
+    # codes 2, 3, 6 and 8 haven't been seen yet. The page shows "(state N)"
+    # next to any unknown code so you can add it here. An unknown code counts
+    # as cleaning while the mode is a cleaning mode. Setting status_labels
+    # replaces the model's list, so copy the known ones too.
+    # status_labels: {"0": "Stopped", "1": "Cleaning", "7": "Paused", "4": "Returning to dock", "5": "On dock, charging"}
+    # cleaning_statuses: ["1"]
+    # paused_statuses: ["7", "0"]
