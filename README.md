@@ -2,10 +2,12 @@
 
 Controls an iHome AutoVac robot vacuum from MyHomeServicesHub. It runs on the Pi on the home network and connects to the vacuum directly with the Tuya LAN protocol (3.3), so no cloud is involved once it's set up.
 
-- **Control:** start (auto, edges, spot, random, mop), pause and resume, dock, stop, suction power and locate (beep).
-- **Status:** state, battery, mode, suction, and the time and area of the clean in progress.
-- **Schedules:** cleans at set times on chosen weekdays, run by the Pi in its local time.
+- **Control:** start (auto, edges, spot, random, mop), pause and resume, dock, stop, suction power, locate (beep), and driving it by hand with arrow buttons.
+- **Status:** state, battery, mode, suction, the time and area of the clean in progress, and faults in words ("Main brush stuck").
+- **Schedules:** cleans at set times on chosen weekdays or once on a date, run by the Pi in its local time, with optional quiet hours that schedules skip.
 - **History:** every clean (length, area, battery used, who or what started it, how it ended) and every command sent, kept in MariaDB `vac_db`.
+- **Statistics:** cleans, time and area for the last 30 days and all time, and a chart of cleaning time per week.
+- **Maintenance:** wear on the brushes and filter, from the cleaning hours since each was replaced.
 
 | | |
 |---|---|
@@ -60,11 +62,30 @@ cp config.example.yaml config.yaml   # fill in host, device_id, local_key, DB pa
 | Battery | 39 | 6 (reads 0 locally; the battery level comes from 102) |
 | Area / time | 41 (m²) / 42 (min) | inside 102 (base64 JSON) |
 | Fault | 11 (bitmap) | 110 |
+| Drive | 26: forward, backward, turn_left, turn_right, stop | none |
 | Locate | none | 13 |
 
 Tuya doesn't document the Eclipse's status codes. The ones above were read with `-dump` during a start, pause, resume and dock cycle. Any other code shows as "(state N)" on the page, and it counts as cleaning while the mode is a cleaning mode. Once you know what a code means, add it under `status_labels` in config.yaml. The Eclipse ignores its start switch (33) over the LAN and never reports it, so the module starts it by setting the mode and pauses it with 26 = stop. A stopped clean stays open in the history until the vacuum docks.
 
 To read a model's data points from the cloud: in your Tuya project, go to **API Explorer** and call **Device Control → Query Things Data Model** with the device ID.
+
+### Faults and driving: check them on your vacuum
+
+The Eclipse's fault bitmap (11) and drive values (26) are Tuya's standard robot vacuum ones and haven't yet been confirmed on a real iHRV:
+
+- **Faults:** bit 0 side brush, 1 main brush, 2 left wheel, 3 right wheel, 4 dustbin, 5 cliff sensor / lifted, 6 bumper. To check, run `-dump` and lift the vacuum or take the dustbin out, then see which value 11 reports. An unnamed bit shows as "Fault bit N". To rename them, set `fault_bits` (bit 0 first). If 11 turns out to be a plain code rather than a bitmap, set `fault_codes` instead.
+- **Driving:** stop the service first (`sudo systemctl stop vac-control`), because the vacuum takes only one LAN connection. Put the vacuum off the dock in open space, then run these back to back. Nothing stops it in between, so it drives until the second command:
+  ```bash
+  ./vac-control -dump autovac -seconds 2 -set '{"26":"forward"}'
+  ./vac-control -dump autovac -seconds 2 -set '{"26":"stop"}'
+  ```
+  If it doesn't move, try the other spellings from its thing model (for example `turnleft`) under `directions:`.
+
+While you hold a drive button, the page sends the direction again every second. If 2.5 s pass with no repeat (the tab closed, the phone locked or Wi-Fi dropped), the service sends stop.
+
+### Parts
+
+Wear is worked out from the time logged in clean history since each part was last marked as replaced, pauses included. The default lives are typical robot vacuum figures: main brush 300 h, side brush 200 h and filter 150 h. To use the figures from your manual, set `parts:` (see config.example.yaml). Until a part is first marked as replaced, all recorded cleans count toward its wear.
 
 ## 4. Database
 
@@ -76,7 +97,7 @@ GRANT ALL ON vac_db.* TO 'vac_app'@'localhost';
 GRANT ALL ON vac_db.* TO 'vac_app'@'127.0.0.1';
 ```
 
-The tables (`cleans`, `command_log`, `schedules`) are created on first start. Add `vac_db` to the nightly backup in MyHomeServicesHub/backup.
+The tables (`cleans`, `command_log`, `schedules`, `part_resets`, `quiet_hours`) are created on first start, and an older `schedules` table gets its new `run_date` column then too (this needs MariaDB 10.0.2 or later). Add `vac_db` to the nightly backup in MyHomeServicesHub/backup.
 
 ## 5. Install on the Pi
 
@@ -100,7 +121,7 @@ Then add the hub tile and route. MyHomeServicesHub's main.go already proxies `/v
 
 - One persistent TCP connection per vacuum on port 6668, with a heartbeat every 10 s. It reconnects with backoff from 5 s up to 60 s. The vacuum pushes every state change over this connection, and the page polls the service every 3 s.
 - A clean starts when the vacuum starts cleaning and ends when it docks, goes idle or stops. A pause doesn't end it. A dropped connection doesn't end a clean. A clean is credited to whoever sent Start within the previous 2 minutes, otherwise to "vacuum" (its own app or button).
-- Schedules are checked every 20 s. A schedule is skipped and logged if the vacuum is already cleaning.
+- Schedules are checked every 20 s. A schedule is skipped and logged if the vacuum is already cleaning, or if its time falls in the quiet hours. Quiet hours are checked when a schedule comes due, so changing them applies to existing schedules too. Starting a clean by hand ignores them.
 
 ## Development
 

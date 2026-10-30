@@ -63,6 +63,30 @@ type Vacuum struct {
 	StatusLabels     map[string]string `yaml:"status_labels"`
 	CleaningStatuses []string          `yaml:"cleaning_statuses"`
 	PausedStatuses   []string          `yaml:"paused_statuses"`
+	// What the error data point means: FaultBits names each bit of a bitmap
+	// (bit 0 first); without them, FaultCodes names whole values.
+	FaultBits  []string          `yaml:"fault_bits"`
+	FaultCodes map[string]string `yaml:"fault_codes"`
+	// Values the direction data point takes for forward, backward, left,
+	// right and stop
+	Directions map[string]string `yaml:"directions"`
+	// Parts that wear out, with their life in cleaning hours
+	Parts []Part `yaml:"parts"`
+}
+
+// Part is a consumable, such as a brush or filter.
+type Part struct {
+	ID    string  `yaml:"id" json:"id"`
+	Name  string  `yaml:"name" json:"name"`
+	Hours float64 `yaml:"hours" json:"hours"`
+}
+
+// defaultParts are typical robot vacuum part lives; set parts in
+// config.yaml to match the manual.
+var defaultParts = []Part{
+	{ID: "main_brush", Name: "Main brush", Hours: 300},
+	{ID: "side_brush", Name: "Side brush", Hours: 200},
+	{ID: "filter", Name: "Filter", Hours: 150},
 }
 
 // DPMap says which Tuya data point carries what (run with -dump to see
@@ -79,6 +103,7 @@ type DPMap struct {
 	Error     int `yaml:"error"`      // fault code or bitmap, 0 = none
 	Area      int `yaml:"area"`       // m² cleaned this run
 	CleanTime int `yaml:"clean_time"` // minutes cleaned this run
+	Direction int `yaml:"direction"`  // enum: manual driving
 }
 
 // models are the known AutoVacs' data points, from the Tuya cloud's thing
@@ -88,7 +113,7 @@ var models = map[string]Vacuum{
 		// The start switch (power_go, 33) is ignored over the LAN, so it's
 		// left out: setting the mode starts a clean, and directioncontrol
 		// (26) "stop" halts it where it is (status 0)
-		DPs:      DPMap{Power: 1, Mode: 25, Status: 38, Battery: 39, Suction: 27, Error: 11, Area: 41, CleanTime: 42},
+		DPs:      DPMap{Power: 1, Mode: 25, Status: 38, Battery: 39, Suction: 27, Error: 11, Area: 41, CleanTime: 42, Direction: 26},
 		Modes:    []string{"smart", "wallfollow", "sprial", "single", "mop"}, // "sprial" is spelled that way by the vacuum
 		Suction:  []string{"ECO", "normal", "strong"},
 		DockMode: "chargego",
@@ -104,6 +129,12 @@ var models = map[string]Vacuum{
 		CleaningStatuses: []string{"1"},
 		// A stopped clean can be resumed, so it stays open until it docks
 		PausedStatuses: []string{"7", "0"},
+		// Tuya's standard robot vacuum fault bitmap and direction values,
+		// which the AutoVac's thing model follows
+		FaultBits: []string{"Side brush stuck", "Main brush stuck", "Left wheel stuck", "Right wheel stuck",
+			"Dustbin missing", "Cliff sensor / lifted", "Bumper stuck"},
+		Directions: map[string]string{"forward": "forward", "backward": "backward", "left": "turn_left",
+			"right": "turn_right", "stop": "stop"},
 	},
 	"nova": {
 		DPs:      DPMap{Power: 1, Start: 2, Mode: 3, Status: 5, Battery: 6, Locate: 13, Suction: 14, RawData: 102, Error: 110},
@@ -217,6 +248,20 @@ func (v *Vacuum) applyModel() error {
 	}
 	if v.PausedStatuses == nil {
 		v.PausedStatuses = m.PausedStatuses
+	}
+	if v.FaultBits == nil && v.FaultCodes == nil {
+		v.FaultBits = m.FaultBits
+	}
+	if v.Directions == nil {
+		v.Directions = m.Directions
+	}
+	if v.Parts == nil {
+		v.Parts = defaultParts
+	}
+	for _, p := range v.Parts {
+		if p.ID == "" || len(p.ID) > 32 || p.Hours <= 0 {
+			return fmt.Errorf("vacuum %q: each part needs an id (up to 32 characters) and hours", v.ID)
+		}
 	}
 	return nil
 }

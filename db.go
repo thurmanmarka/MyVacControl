@@ -24,6 +24,7 @@ type CleanRun struct {
 	BatteryStart *int       `json:"battery_start,omitempty"`
 	BatteryEnd   *int       `json:"battery_end,omitempty"`
 	ErrorCode    int        `json:"error_code"`
+	Faults       []string   `json:"faults,omitempty"` // ErrorCode for people; not stored
 }
 
 // CommandEntry is one command sent to the vacuum, by a person or a schedule.
@@ -43,12 +44,27 @@ type Schedule struct {
 	VacuumID  string     `json:"vacuum"`
 	Name      string     `json:"name"`
 	Days      int        `json:"days"` // bit per time.Weekday: 1 = Sunday ... 64 = Saturday
+	Date      string     `json:"date"` // "YYYY-MM-DD" for a one-off clean, which ignores Days
 	At        string     `json:"at"`   // "HH:MM", Pi local time
 	Mode      string     `json:"mode"`
 	Suction   string     `json:"suction"` // "" = leave as is
 	Enabled   bool       `json:"enabled"`
 	CreatedBy string     `json:"created_by"`
 	LastRun   *time.Time `json:"last_run,omitempty"`
+	InQuiet   bool       `json:"in_quiet,omitempty"` // its time is in the quiet hours; not stored
+}
+
+// PartReset is when a part was last replaced.
+type PartReset struct {
+	At time.Time `json:"at"`
+	By string    `json:"by"`
+}
+
+// QuietHours is a daily window, in Pi local time, when schedules don't
+// start a clean. From after To wraps past midnight; both "" means none.
+type QuietHours struct {
+	From string `json:"from"`
+	To   string `json:"to"`
 }
 
 var errNotFound = errors.New("not found")
@@ -116,6 +132,7 @@ func openStore(c DatabaseConfig) (*store, error) {
 			vacuum_id   VARCHAR(64) NOT NULL,
 			name        VARCHAR(64) NOT NULL,
 			days        TINYINT UNSIGNED NOT NULL,
+			run_date    CHAR(10) NOT NULL DEFAULT '',
 			at_time     CHAR(5) NOT NULL,
 			mode        VARCHAR(32) NOT NULL,
 			suction     VARCHAR(32) NOT NULL DEFAULT '',
@@ -123,6 +140,20 @@ func openStore(c DatabaseConfig) (*store, error) {
 			created_by  VARCHAR(64) NOT NULL,
 			last_run_at DATETIME NULL,
 			KEY idx_vacuum (vacuum_id)
+		) ENGINE=InnoDB`,
+		// For schedules tables made before one-off cleans
+		`ALTER TABLE schedules ADD COLUMN IF NOT EXISTS run_date CHAR(10) NOT NULL DEFAULT '' AFTER days`,
+		`CREATE TABLE IF NOT EXISTS part_resets (
+			vacuum_id VARCHAR(64) NOT NULL,
+			part      VARCHAR(32) NOT NULL,
+			reset_at  DATETIME NOT NULL,
+			reset_by  VARCHAR(96) NOT NULL,
+			PRIMARY KEY (vacuum_id, part)
+		) ENGINE=InnoDB`,
+		`CREATE TABLE IF NOT EXISTS quiet_hours (
+			vacuum_id VARCHAR(64) NOT NULL PRIMARY KEY,
+			from_time CHAR(5) NOT NULL,
+			to_time   CHAR(5) NOT NULL
 		) ENGINE=InnoDB`,
 	} {
 		if _, err := conn.Exec(ddl); err != nil {
@@ -180,9 +211,18 @@ func (s *store) RecordClean(c CleanRun) {
 }
 
 func (s *store) RecentCleans(vacuumID string, n int) ([]CleanRun, error) {
+	return s.cleans(`WHERE vacuum_id = ? ORDER BY started_at DESC LIMIT ?`, vacuumID, n)
+}
+
+// CleansSince returns the cleans started at or after since, oldest first.
+func (s *store) CleansSince(vacuumID string, since time.Time) ([]CleanRun, error) {
+	return s.cleans(`WHERE vacuum_id = ? AND started_at >= ? ORDER BY started_at`, vacuumID, since.UTC())
+}
+
+func (s *store) cleans(where string, args ...any) ([]CleanRun, error) {
 	rows, err := s.db.Query(`SELECT id, vacuum_id, started_at, ended_at, started_by, mode, end_status,
 			area_m2, battery_start, battery_end, error_code
-		FROM cleans WHERE vacuum_id = ? ORDER BY started_at DESC LIMIT ?`, vacuumID, n)
+		FROM cleans `+where, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -207,7 +247,7 @@ func (s *store) RecentCleans(vacuumID string, n int) ([]CleanRun, error) {
 
 // Schedules returns every schedule, or one vacuum's when vacuumID is set.
 func (s *store) Schedules(vacuumID string) ([]Schedule, error) {
-	q := `SELECT id, vacuum_id, name, days, at_time, mode, suction, enabled, created_by, last_run_at FROM schedules`
+	q := `SELECT id, vacuum_id, name, days, run_date, at_time, mode, suction, enabled, created_by, last_run_at FROM schedules`
 	args := []any{}
 	if vacuumID != "" {
 		q += ` WHERE vacuum_id = ?`
@@ -222,7 +262,7 @@ func (s *store) Schedules(vacuumID string) ([]Schedule, error) {
 	for rows.Next() {
 		var sc Schedule
 		var last sql.NullTime
-		if err := rows.Scan(&sc.ID, &sc.VacuumID, &sc.Name, &sc.Days, &sc.At, &sc.Mode, &sc.Suction,
+		if err := rows.Scan(&sc.ID, &sc.VacuumID, &sc.Name, &sc.Days, &sc.Date, &sc.At, &sc.Mode, &sc.Suction,
 			&sc.Enabled, &sc.CreatedBy, &last); err != nil {
 			return nil, err
 		}
@@ -248,9 +288,9 @@ func (s *store) Schedule(id int64) (Schedule, error) {
 }
 
 func (s *store) AddSchedule(sc Schedule) (int64, error) {
-	res, err := s.db.Exec(`INSERT INTO schedules (vacuum_id, name, days, at_time, mode, suction, enabled, created_by)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-		sc.VacuumID, sc.Name, sc.Days, sc.At, sc.Mode, sc.Suction, sc.Enabled, truncate(sc.CreatedBy, 64))
+	res, err := s.db.Exec(`INSERT INTO schedules (vacuum_id, name, days, run_date, at_time, mode, suction, enabled, created_by)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		sc.VacuumID, sc.Name, sc.Days, sc.Date, sc.At, sc.Mode, sc.Suction, sc.Enabled, truncate(sc.CreatedBy, 64))
 	if err != nil {
 		return 0, err
 	}
@@ -258,8 +298,8 @@ func (s *store) AddSchedule(sc Schedule) (int64, error) {
 }
 
 func (s *store) UpdateSchedule(sc Schedule) error {
-	res, err := s.db.Exec(`UPDATE schedules SET name = ?, days = ?, at_time = ?, mode = ?, suction = ?, enabled = ?
-		WHERE id = ?`, sc.Name, sc.Days, sc.At, sc.Mode, sc.Suction, sc.Enabled, sc.ID)
+	res, err := s.db.Exec(`UPDATE schedules SET name = ?, days = ?, run_date = ?, at_time = ?, mode = ?, suction = ?,
+		enabled = ? WHERE id = ?`, sc.Name, sc.Days, sc.Date, sc.At, sc.Mode, sc.Suction, sc.Enabled, sc.ID)
 	return checkAffected(res, err)
 }
 
@@ -270,6 +310,52 @@ func (s *store) DeleteSchedule(id int64) error {
 
 func (s *store) MarkScheduleRun(id int64, at time.Time) error {
 	_, err := s.db.Exec(`UPDATE schedules SET last_run_at = ? WHERE id = ?`, at.UTC(), id)
+	return err
+}
+
+// PartResets returns when each of a vacuum's parts was last replaced, by part id.
+func (s *store) PartResets(vacuumID string) (map[string]PartReset, error) {
+	rows, err := s.db.Query(`SELECT part, reset_at, reset_by FROM part_resets WHERE vacuum_id = ?`, vacuumID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string]PartReset{}
+	for rows.Next() {
+		var part string
+		var r PartReset
+		if err := rows.Scan(&part, &r.At, &r.By); err != nil {
+			return nil, err
+		}
+		out[part] = r
+	}
+	return out, rows.Err()
+}
+
+func (s *store) ResetPart(vacuumID, part, by string, at time.Time) error {
+	_, err := s.db.Exec(`INSERT INTO part_resets (vacuum_id, part, reset_at, reset_by) VALUES (?, ?, ?, ?)
+		ON DUPLICATE KEY UPDATE reset_at = VALUES(reset_at), reset_by = VALUES(reset_by)`,
+		vacuumID, part, at.UTC(), truncate(by, 96))
+	return err
+}
+
+func (s *store) QuietHours(vacuumID string) (QuietHours, error) {
+	var q QuietHours
+	err := s.db.QueryRow(`SELECT from_time, to_time FROM quiet_hours WHERE vacuum_id = ?`, vacuumID).Scan(&q.From, &q.To)
+	if errors.Is(err, sql.ErrNoRows) {
+		return QuietHours{}, nil
+	}
+	return q, err
+}
+
+// SetQuietHours saves q; an empty window removes them.
+func (s *store) SetQuietHours(vacuumID string, q QuietHours) error {
+	if q.From == "" {
+		_, err := s.db.Exec(`DELETE FROM quiet_hours WHERE vacuum_id = ?`, vacuumID)
+		return err
+	}
+	_, err := s.db.Exec(`INSERT INTO quiet_hours (vacuum_id, from_time, to_time) VALUES (?, ?, ?)
+		ON DUPLICATE KEY UPDATE from_time = VALUES(from_time), to_time = VALUES(to_time)`, vacuumID, q.From, q.To)
 	return err
 }
 

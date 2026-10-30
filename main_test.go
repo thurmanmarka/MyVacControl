@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http/httptest"
 	"os"
@@ -144,6 +145,144 @@ func TestCommand(t *testing.T) {
 	// The Eclipse has no locate data point
 	if _, err := testVacuum("x", "eclipse").Command("locate", ""); err == nil {
 		t.Error("locate without a data point accepted")
+	}
+}
+
+func TestDriveCommand(t *testing.T) {
+	checkCommands(t, testVacuum("x", "eclipse"), []commandCase{
+		{"drive", "forward", map[string]any{"26": "forward"}},
+		{"drive", "left", map[string]any{"26": "turn_left"}},
+		{"drive", "stop", map[string]any{"26": "stop"}},
+	})
+	if _, err := testVacuum("x", "eclipse").Command("drive", "up"); err == nil {
+		t.Error("unknown direction accepted")
+	}
+	if _, err := testVacuum("x", "nova").Command("drive", "forward"); err == nil {
+		t.Error("drive without a direction data point accepted")
+	}
+}
+
+func TestFaults(t *testing.T) {
+	v := testVacuum("x", "eclipse")
+	if f := v.Faults(0); f != nil {
+		t.Errorf("no fault: %v", f)
+	}
+	if f := strings.Join(v.Faults(1|16), ", "); f != "Side brush stuck, Dustbin missing" {
+		t.Errorf("bits 0 and 4: %s", f)
+	}
+	if f := v.Faults(1 << 9); len(f) != 1 || f[0] != "Fault bit 9" {
+		t.Errorf("unknown bit: %v", f)
+	}
+	v.FaultBits, v.FaultCodes = nil, map[string]string{"3": "Stuck"}
+	if f := v.Faults(3); f[0] != "Stuck" {
+		t.Errorf("named code: %v", f)
+	}
+	if f := v.Faults(4); f[0] != "Fault code 4" {
+		t.Errorf("unnamed code: %v", f)
+	}
+
+	// The device decodes the error data point as it arrives
+	dev, _ := newDevice(testVacuum("x", "eclipse"))
+	dev.apply(map[string]any{"11": 4.0})
+	if st := dev.State(); st.ErrorCode != 4 || len(st.Faults) != 1 || st.Faults[0] != "Left wheel stuck" {
+		t.Errorf("state %v %v", st.ErrorCode, st.Faults)
+	}
+}
+
+func TestOneOffSchedule(t *testing.T) {
+	v := testVacuum("x", "eclipse")
+	sc := Schedule{Date: "2026-11-04", Days: 5, At: "15:00", Mode: "smart", Enabled: true}
+	if err := sc.Validate(v); err != nil || sc.Days != 0 {
+		t.Fatalf("validate: %v, days %d", err, sc.Days)
+	}
+	at := time.Date(2026, 11, 4, 15, 0, 5, 0, time.Local)
+	if !sc.Due(at) {
+		t.Fatal("not due on its date")
+	}
+	if sc.Due(at.AddDate(0, 0, 7)) || sc.Due(at.AddDate(0, 0, -1)) {
+		t.Fatal("due on another date")
+	}
+	if bad := (Schedule{Date: "4/11/2026", At: "15:00", Mode: "smart"}); bad.Validate(v) == nil {
+		t.Fatal("bad date accepted")
+	}
+}
+
+func TestQuietHours(t *testing.T) {
+	night := QuietHours{From: "22:00", To: "07:00"}
+	day := QuietHours{From: "12:30", To: "14:00"}
+	for _, c := range []struct {
+		q    QuietHours
+		at   string
+		want bool
+	}{
+		{night, "23:15", true}, {night, "02:00", true}, {night, "07:00", false}, {night, "21:59", false},
+		{day, "12:30", true}, {day, "13:59", true}, {day, "14:00", false}, {day, "09:00", false},
+		{QuietHours{}, "02:00", false},
+	} {
+		if got := c.q.Covers(c.at); got != c.want {
+			t.Errorf("%v at %s: got %v", c.q, c.at, got)
+		}
+	}
+	for _, bad := range []QuietHours{{From: "22:00"}, {From: "7:00", To: "08:00"}, {From: "08:00", To: "08:00"}} {
+		if bad.Validate() == nil {
+			t.Errorf("%v accepted", bad)
+		}
+	}
+	if (&QuietHours{}).Validate() != nil {
+		t.Error("no quiet hours rejected")
+	}
+}
+
+func cleanAt(start time.Time, minutes, area, errCode int) CleanRun {
+	end := start.Add(time.Duration(minutes) * time.Minute)
+	return CleanRun{StartedAt: start, EndedAt: &end, Area: ptr(area), ErrorCode: errCode}
+}
+
+func TestSummarize(t *testing.T) {
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.Local) // a Thursday
+	cleans := []CleanRun{
+		cleanAt(now.AddDate(0, -6, 0), 60, 30, 0),                            // before the chart, still all-time
+		cleanAt(time.Date(2026, 10, 19, 9, 0, 0, 0, time.Local), 40, 20, 0),  // last week's Monday
+		cleanAt(time.Date(2026, 10, 25, 23, 0, 0, 0, time.Local), 30, 10, 2), // last week's Sunday, ended in a fault
+		cleanAt(time.Date(2026, 10, 26, 0, 30, 0, 0, time.Local), 50, 25, 0), // this week's Monday
+	}
+	st := summarize(cleans, now, 12)
+	if st.AllTime != (CleanTotals{Cleans: 4, Minutes: 180, Area: 85, Faults: 1}) {
+		t.Errorf("all time %+v", st.AllTime)
+	}
+	if st.Last30 != (CleanTotals{Cleans: 3, Minutes: 120, Area: 55, Faults: 1}) {
+		t.Errorf("last 30 days %+v", st.Last30)
+	}
+	if len(st.Weeks) != 12 || st.Weeks[11].Start != "2026-10-26" || st.Weeks[10].Start != "2026-10-19" {
+		t.Fatalf("weeks %+v", st.Weeks)
+	}
+	if st.Weeks[11].Cleans != 1 || st.Weeks[10].Cleans != 2 || st.Weeks[10].Minutes != 70 {
+		t.Errorf("this week %+v, last week %+v", st.Weeks[11], st.Weeks[10])
+	}
+	if empty := summarize(nil, now, 12); empty.Since != nil || empty.AllTime.Cleans != 0 {
+		t.Errorf("no cleans %+v", empty)
+	}
+}
+
+func TestPartStatus(t *testing.T) {
+	now := time.Date(2026, 10, 29, 12, 0, 0, 0, time.Local)
+	cleans := []CleanRun{
+		cleanAt(now.AddDate(0, 0, -20), 120, 0, 0),
+		cleanAt(now.AddDate(0, 0, -5), 60, 0, 0),
+	}
+	current := &CleanRun{StartedAt: now.Add(-30 * time.Minute)}
+	filter := Part{ID: "filter", Name: "Filter", Hours: 10}
+
+	ps := partStatus(filter, nil, cleans, current, now)
+	if ps.UsedHours != 3.5 || ps.Left != 0.65 || ps.ResetAt != nil {
+		t.Errorf("never replaced %+v", ps)
+	}
+	ps = partStatus(filter, &PartReset{At: now.AddDate(0, 0, -10), By: "bob"}, cleans, nil, now)
+	if ps.UsedHours != 1 || ps.ResetBy != "bob" {
+		t.Errorf("replaced 10 days ago %+v", ps)
+	}
+	if ps := partStatus(Part{Hours: 1}, nil, cleans, nil, now); ps.Left != 0 {
+		t.Errorf("worn out: left %v", ps.Left)
 	}
 }
 
@@ -430,5 +569,57 @@ func TestDeviceAgainstFakeVacuum(t *testing.T) {
 	fv.mu.Unlock()
 	if got["3"] != "smart" || got["2"] != true {
 		t.Fatalf("vacuum got %v", got)
+	}
+}
+
+// A drive the page stops repeating is stopped by the server
+func TestDriveTimesOut(t *testing.T) {
+	fv := startFakeVacuum(t)
+	v := testVacuum("127.0.0.1", "eclipse")
+	dev, err := newDevice(v)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, port, _ := net.SplitHostPort(fv.ln.Addr().String())
+	dev.addr = net.JoinHostPort("127.0.0.1", port)
+	vac := &vacuum{cfg: v, dev: dev, track: newTracker("t", func(CleanRun) {})}
+
+	old := driveTimeout
+	driveTimeout = 100 * time.Millisecond
+	defer func() { driveTimeout = old }()
+
+	stop := make(chan struct{})
+	defer close(stop)
+	go dev.Run(stop)
+	waitFor(t, "connection", func() bool { return dev.State().Connected })
+
+	controls := func() []string {
+		fv.mu.Lock()
+		defer fv.mu.Unlock()
+		var out []string
+		for _, c := range fv.controls {
+			out = append(out, fmt.Sprint(c["26"]))
+		}
+		return out
+	}
+	// Held for a while, with repeats, then let go without a stop
+	for range 3 {
+		if err := vac.run("bob", "drive", "forward"); err != nil {
+			t.Fatal(err)
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	waitFor(t, "auto stop", func() bool { c := controls(); return len(c) == 4 && c[3] == "stop" })
+	time.Sleep(150 * time.Millisecond)
+	if c := controls(); len(c) != 4 {
+		t.Fatalf("sent %v", c)
+	}
+
+	// Let go with a stop: nothing more is sent
+	vac.run("bob", "drive", "left")
+	vac.run("bob", "drive", "stop")
+	time.Sleep(200 * time.Millisecond)
+	if c := controls(); strings.Join(c[4:], ",") != "turn_left,stop" {
+		t.Fatalf("sent %v", c)
 	}
 }

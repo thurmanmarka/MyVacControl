@@ -44,6 +44,7 @@ type State struct {
 	Suction     string         `json:"suction"`
 	Battery     *int           `json:"battery"`
 	ErrorCode   int            `json:"error_code"`
+	Faults      []string       `json:"faults,omitempty"` // ErrorCode for people
 	Stats       *Stats         `json:"stats,omitempty"`
 	DPs         map[string]any `json:"dps"`
 }
@@ -268,6 +269,7 @@ func (d *Device) apply(dps map[string]any) {
 		case dm.Error:
 			if e, ok := v.(float64); ok {
 				d.state.ErrorCode = int(e)
+				d.state.Faults = d.cfg.Faults(int(e))
 			}
 		case dm.RawData:
 			if s, ok := v.(string); ok {
@@ -401,8 +403,43 @@ func (v *Vacuum) Command(action, value string) (map[string]any, error) {
 			return nil, fmt.Errorf("unknown suction level %q", value)
 		}
 		return map[string]any{dp(dm.Suction): value}, nil
+	case "drive":
+		if err := need(dm.Direction, "direction"); err != nil {
+			return nil, err
+		}
+		d, ok := v.Directions[value]
+		if !ok {
+			return nil, fmt.Errorf("unknown direction %q", value)
+		}
+		return map[string]any{dp(dm.Direction): d}, nil
 	}
 	return nil, fmt.Errorf("unknown action %q", action)
+}
+
+// Faults describes an error data point value: each set bit of a bitmap when
+// FaultBits are known, otherwise the whole code.
+func (v *Vacuum) Faults(code int) []string {
+	if code == 0 {
+		return nil
+	}
+	if len(v.FaultBits) == 0 {
+		if l, ok := v.FaultCodes[strconv.Itoa(code)]; ok {
+			return []string{l}
+		}
+		return []string{fmt.Sprintf("Fault code %d", code)}
+	}
+	var out []string
+	for i := 0; i < 31; i++ {
+		if code&(1<<i) == 0 {
+			continue
+		}
+		if i < len(v.FaultBits) && v.FaultBits[i] != "" {
+			out = append(out, v.FaultBits[i])
+		} else {
+			out = append(out, fmt.Sprintf("Fault bit %d", i))
+		}
+	}
+	return out
 }
 
 // Phase says whether the vacuum is cleaning, paused or idle, or "" when

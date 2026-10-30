@@ -129,6 +129,32 @@
         .sched-form .actions { grid-column: 1 / -1; display: flex; gap: 10px; }
         @media (max-width: 700px) { .sched-form { grid-template-columns: 1fr 1fr; } }
 
+        .fault { margin-top: 12px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--bad); color: var(--bad); font-weight: 500; }
+
+        .drive { margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--panel-border); display: flex; gap: 20px; align-items: center; flex-wrap: wrap; }
+        .dpad { display: grid; grid-template-columns: repeat(3, 52px); grid-template-rows: repeat(3, 52px); gap: 6px; }
+        .dpad button { font-size: 1.2rem; padding: 0; touch-action: none; user-select: none; -webkit-user-select: none; }
+        .dpad button.held { background: var(--accent); color: #fff; }
+
+        .part-bar { height: 8px; border-radius: 4px; background: var(--panel-border); overflow: hidden; min-width: 90px; }
+        .part-bar div { height: 100%; background: var(--ok); }
+        .part-bar div.warn { background: var(--warn); }
+        .part-bar div.bad { background: var(--bad); }
+
+        .chart-title { font-size: 0.85rem; color: var(--text-muted); margin: 18px 0 8px; }
+        .chart { position: relative; display: flex; align-items: flex-end; gap: 2px; height: 150px; border-bottom: 1px solid var(--panel-border); }
+        .chart .grid { position: absolute; left: 0; right: 0; top: 0; border-top: 1px dashed var(--panel-border); }
+        .chart .grid span { position: absolute; right: 0; top: -1.3em; font-size: 0.72rem; color: var(--text-muted); }
+        .chart .col { flex: 1; height: 100%; display: flex; align-items: flex-end; justify-content: center; cursor: default; }
+        .chart .bar { width: min(70%, 28px); background: var(--accent); border-radius: 4px 4px 0 0; min-height: 0; }
+        .chart .col:hover .bar, .chart .col:focus .bar { opacity: 0.8; outline: 2px solid var(--panel-bg); }
+        .chart-x { display: flex; gap: 2px; font-size: 0.72rem; color: var(--text-muted); margin-top: 4px; }
+        .chart-x span { flex: 1; text-align: center; white-space: nowrap; overflow: hidden; }
+        .tip { position: absolute; z-index: 2; pointer-events: none; background: var(--panel-bg); border: 1px solid var(--panel-border); border-radius: 6px; padding: 6px 8px; font-size: 0.8rem; white-space: nowrap; box-shadow: 0 4px 12px rgba(15, 23, 42, 0.15); transform: translate(-50%, -100%); }
+
+        .quiet { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-top: 16px; padding-top: 16px; border-top: 1px solid var(--panel-border); }
+        .tag { font-size: 0.75rem; color: var(--warn); font-weight: 600; }
+
         .tabs { display: flex; gap: 6px; }
         .tabs button { font: inherit; font-size: 0.85rem; border: 1px solid var(--panel-border); background: none; color: var(--text-muted); border-radius: 6px; padding: 4px 10px; cursor: pointer; }
         .tabs button.active { background: var(--accent-soft); color: var(--text-main); }
@@ -168,6 +194,18 @@
                     <select id="suctionSelect"></select>
                 </label>
                 <button class="btn secondary" id="locateBtn">🔔 Locate</button>
+                <button class="btn secondary" id="driveBtn">🕹 Drive</button>
+            </div>
+            <div id="faultNote" class="fault hidden"></div>
+            <div class="drive hidden" id="driveWrap">
+                <div class="dpad" id="dpad">
+                    <span></span><button class="btn secondary" data-dir="forward" aria-label="Forward">▲</button><span></span>
+                    <button class="btn secondary" data-dir="left" aria-label="Turn left">◀</button>
+                    <button class="btn secondary" data-dir="stop" aria-label="Stop">■</button>
+                    <button class="btn secondary" data-dir="right" aria-label="Turn right">▶</button>
+                    <span></span><button class="btn secondary" data-dir="backward" aria-label="Backward">▼</button><span></span>
+                </div>
+                <div class="muted">Hold an arrow to drive; let go to stop.<br>It also stops by itself if this page loses touch.</div>
             </div>
             <div id="ctlMsg" class="msg"></div>
         </div>
@@ -185,16 +223,56 @@
             </div>
             <form id="schedForm" class="sched-form hidden">
                 <label>Name <input id="sfName" maxlength="64" placeholder="e.g. Weekday morning"></label>
-                <label>Time <input id="sfAt" type="time" required></label>
+                <label>Repeat
+                    <select id="sfRepeat"><option value="weekly">Weekly</option><option value="once">Once</option></select>
+                </label>
                 <label>Mode <select id="sfMode"></select></label>
                 <label>Suction <select id="sfSuction"></select></label>
+                <label>Time <input id="sfAt" type="time" required></label>
+                <label id="sfDateWrap" class="hidden">Date <input id="sfDate" type="date"></label>
                 <div class="days" id="sfDays"></div>
                 <div class="actions">
                     <button class="btn" type="submit" id="sfSave">Save</button>
                     <button class="btn secondary" type="button" id="sfCancel">Cancel</button>
                 </div>
             </form>
+            <form class="quiet" id="quietForm">
+                <label>Quiet from <input id="qFrom" type="time"></label>
+                <label>until <input id="qTo" type="time"></label>
+                <button class="btn secondary" type="submit">Save quiet hours</button>
+                <button class="btn danger" type="button" id="qOff">Turn off</button>
+                <span class="muted" id="qNote">Schedules don't start a clean during quiet hours.</span>
+            </form>
             <div id="schedMsg" class="msg"></div>
+        </div>
+
+        <div class="panel" id="statsPanel">
+            <div class="panel-title">
+                <span>Statistics <span class="muted" id="statsSince"></span></span>
+            </div>
+            <div class="stats">
+                <div class="stat"><div class="k">Cleans, last 30 days</div><div class="v" id="s30Cleans">—</div></div>
+                <div class="stat"><div class="k">Time, last 30 days</div><div class="v" id="s30Time">—</div></div>
+                <div class="stat"><div class="k">Area, last 30 days</div><div class="v" id="s30Area">—</div></div>
+                <div class="stat"><div class="k">Average clean</div><div class="v" id="sAvg">—</div></div>
+                <div class="stat"><div class="k">All time</div><div class="v" id="sAll">—</div></div>
+            </div>
+            <div class="chart-title">Cleaning time per week</div>
+            <div class="chart" id="weekChart"></div>
+            <div class="chart-x" id="weekAxis"></div>
+        </div>
+
+        <div class="panel" id="partsPanel">
+            <div class="panel-title">
+                <span>Maintenance <span class="muted">from cleaning hours since each part was replaced</span></span>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead><tr><th>Part</th><th>Used</th><th>Life left</th><th></th><th>Last replaced</th><th></th></tr></thead>
+                    <tbody id="partRows"></tbody>
+                </table>
+            </div>
+            <div id="partMsg" class="msg"></div>
         </div>
 
         <div class="panel" id="historyPanel">
