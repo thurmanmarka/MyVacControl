@@ -58,28 +58,25 @@ cp config.example.yaml config.yaml   # fill in host, device_id, local_key, DB pa
 | Pause / stop | 26 = stop (stops where it is, status 0); resume sets the mode again | 2 = false / mode standby |
 | Mode | 25: smart, wallfollow, sprial, single, mop, chargego, idle | 3: smart, wall_follow, spiral, random, mop, chargego, standby |
 | Suction | 27: ECO, normal, strong | 14: gentle, normal, strong |
-| Status | 38: 1 cleaning, 0 stopped, 7 paused (Smart Life's pause), 4 returning to dock, 5 on dock charging (2, 3, 6, 8 not seen yet) | 5: named states |
+| Status | 38: 0 standby/stopped, 1 cleaning, 2 mopping, 3 edges, 4 returning to dock, 5 on dock charging, 6 spot, 7 paused (Smart Life's pause), 8 one room | 5: named states |
 | Battery | 39 | 6 (reads 0 locally; the battery level comes from 102) |
 | Area / time | 41 (m²) / 42 (min) | inside 102 (base64 JSON) |
-| Fault | 11 (bitmap) | 110 |
-| Drive | 26: forward, backward, turn_left, turn_right, stop | none |
+| Fault | 11 (bitmap, see below) | 110 |
+| Drive | 26: forward, backward, turnleft, turnright, stop | none |
 | Locate | none | 13 |
 
-Tuya doesn't document the Eclipse's status codes. The ones above were read with `-dump` during a start, pause, resume and dock cycle. Any other code shows as "(state N)" on the page, and it counts as cleaning while the mode is a cleaning mode. Once you know what a code means, add it under `status_labels` in config.yaml. The Eclipse ignores its start switch (33) over the LAN and never reports it, so the module starts it by setting the mode and pauses it with 26 = stop. A stopped clean stays open in the history until the vacuum docks.
+The Eclipse's status codes, faults and drive values come from its thing model, and 0, 1, 4, 5 and 7 were also seen with `-dump` during a start, pause, resume and dock cycle. A code outside the list shows as "(state N)" on the page, and it counts as cleaning while the mode is a cleaning mode. To name one, add it under `status_labels` in config.yaml. The Eclipse ignores its start switch (33) over the LAN and never reports it, so the module starts it by setting the mode and pauses it with 26 = stop. A stopped clean stays open in the history until the vacuum docks.
 
 To read a model's data points from the cloud: in your Tuya project, go to **API Explorer** and call **Device Control → Query Things Data Model** with the device ID.
 
-### Faults and driving: check them on your vacuum
+### Faults and driving
 
-The Eclipse's fault bitmap (11) and drive values (26) are Tuya's standard robot vacuum ones and haven't yet been confirmed on a real iHRV:
-
-- **Faults:** bit 0 side brush, 1 main brush, 2 left wheel, 3 right wheel, 4 dustbin, 5 cliff sensor / lifted, 6 bumper. To check, run `-dump` and lift the vacuum or take the dustbin out, then see which value 11 reports. An unnamed bit shows as "Fault bit N". To rename them, set `fault_bits` (bit 0 first). If 11 turns out to be a plain code rather than a bitmap, set `fault_codes` instead.
-- **Driving:** stop the service first (`sudo systemctl stop vac-control`), because the vacuum takes only one LAN connection. Put the vacuum off the dock in open space, then run these back to back. Nothing stops it in between, so it drives until the second command:
+- **Faults (11):** a bitmap. Bit 0 side brush, 1 main brush, 2 left wheel, 3 right wheel, 4 dustbin, 5 cliff sensor / lifted, 6 bumper, 7 water tank missing, 8 boundary strip sensor, 9 robot stuck. A bit outside these shows as "Fault bit N". To rename them, set `fault_bits` (bit 0 first).
+- **Driving (26):** forward, backward, turnleft, turnright and stop, set with `directions:`. To try a value by hand, stop the service first (`sudo systemctl stop vac-control`), because the vacuum takes only one LAN connection. Put the vacuum off the dock in open space, then run these back to back. Nothing stops it in between, so it drives until the second command:
   ```bash
   ./vac-control -dump autovac -seconds 2 -set '{"26":"forward"}'
   ./vac-control -dump autovac -seconds 2 -set '{"26":"stop"}'
   ```
-  If it doesn't move, try the other spellings from its thing model (for example `turnleft`) under `directions:`.
 
 While you hold a drive button, the page sends the direction again every second. If 2.5 s pass with no repeat (the tab closed, the phone locked or Wi-Fi dropped), the service sends stop.
 

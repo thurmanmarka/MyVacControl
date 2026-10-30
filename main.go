@@ -102,14 +102,20 @@ func main() {
 // to the service's allowed_roles in the hub.
 func newMux() *http.ServeMux {
 	member := func(h http.HandlerFunc) http.HandlerFunc { return requireRole(h, "admin", "user") }
-	static := http.StripPrefix("/static/", http.FileServer(http.Dir("static")))
+	files := http.StripPrefix("/static/", http.FileServer(http.Dir("static")))
+	// no-cache makes the browser check for a newer app.js on every load (a
+	// cheap 304 when unchanged), so an update never runs with the old script
+	static := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-cache")
+		files.ServeHTTP(w, r)
+	}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", handleHealth)
 	mux.HandleFunc("GET /vac/health", handleHealth)
 
 	mux.HandleFunc("GET /", member(handleIndex))
-	mux.HandleFunc("GET /static/", member(static.ServeHTTP))
+	mux.HandleFunc("GET /static/", member(static))
 	mux.HandleFunc("GET /api/me", member(handleMe))
 	mux.HandleFunc("GET /api/vacuums", member(handleListVacuums))
 	mux.HandleFunc("GET /api/vacuums/{id}/status", member(handleStatus))

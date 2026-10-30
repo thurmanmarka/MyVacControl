@@ -59,24 +59,26 @@ vacuums:
     # pause: {"26": "stop"}
     # stop: {"26": "stop"}
 
-    # What the status codes mean. These are the Eclipse's as seen on an iHRV2;
-    # codes 2, 3, 6 and 8 haven't been seen yet. The page shows "(state N)"
-    # next to any unknown code so you can add it here. An unknown code counts
-    # as cleaning while the mode is a cleaning mode. Setting status_labels
-    # replaces the model's list, so copy the known ones too.
-    # status_labels: {"0": "Stopped", "1": "Cleaning", "7": "Paused", "4": "Returning to dock", "5": "On dock, charging"}
-    # cleaning_statuses: ["1"]
+    # What the status codes mean. These are the Eclipse's, from its thing
+    # model. The page shows "(state N)" next to any unknown code so you can
+    # add it here. An unknown code counts as cleaning while the mode is a
+    # cleaning mode. Setting status_labels replaces the model's list, so copy
+    # the known ones too.
+    # status_labels: {"0": "Stopped", "1": "Cleaning", "2": "Mopping", "3": "Cleaning edges", "4": "Returning to dock",
+    #                 "5": "On dock, charging", "6": "Spot cleaning", "7": "Paused", "8": "Cleaning one room"}
+    # cleaning_statuses: ["1", "2", "3", "6", "8"]
     # paused_statuses: ["7", "0"]
 
-    # What the fault data point's bits mean, bit 0 first. The Eclipse defaults
-    # to Tuya's standard robot vacuum bitmap (unconfirmed, see README). If the
-    # fault is a plain code instead, name the codes with fault_codes.
+    # What the fault data point's bits mean, bit 0 first. The Eclipse's are
+    # from its thing model. If the fault is a plain code instead, name the
+    # codes with fault_codes.
     # fault_bits: ["Side brush stuck", "Main brush stuck", "Left wheel stuck", "Right wheel stuck",
-    #              "Dustbin missing", "Cliff sensor / lifted", "Bumper stuck"]
+    #              "Dustbin missing", "Cliff sensor / lifted", "Bumper stuck", "Water tank missing",
+    #              "Boundary strip sensor fault", "Robot stuck"]
     # fault_codes: {"3": "Stuck"}
 
     # Values the direction data point takes, for the page's drive buttons
-    # directions: {forward: forward, backward: backward, left: turn_left, right: turn_right, stop: stop}
+    # directions: {forward: forward, backward: backward, left: turnleft, right: turnright, stop: stop}
 
     # Parts that wear out and their life in cleaning hours. Setting parts
     # replaces the defaults (these). The id is kept with each replacement

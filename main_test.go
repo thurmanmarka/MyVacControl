@@ -151,7 +151,8 @@ func TestCommand(t *testing.T) {
 func TestDriveCommand(t *testing.T) {
 	checkCommands(t, testVacuum("x", "eclipse"), []commandCase{
 		{"drive", "forward", map[string]any{"26": "forward"}},
-		{"drive", "left", map[string]any{"26": "turn_left"}},
+		{"drive", "left", map[string]any{"26": "turnleft"}},
+		{"drive", "right", map[string]any{"26": "turnright"}},
 		{"drive", "stop", map[string]any{"26": "stop"}},
 	})
 	if _, err := testVacuum("x", "eclipse").Command("drive", "up"); err == nil {
@@ -170,7 +171,10 @@ func TestFaults(t *testing.T) {
 	if f := strings.Join(v.Faults(1|16), ", "); f != "Side brush stuck, Dustbin missing" {
 		t.Errorf("bits 0 and 4: %s", f)
 	}
-	if f := v.Faults(1 << 9); len(f) != 1 || f[0] != "Fault bit 9" {
+	if f := v.Faults(1 << 9); len(f) != 1 || f[0] != "Robot stuck" {
+		t.Errorf("bit 9: %v", f)
+	}
+	if f := v.Faults(1 << 12); len(f) != 1 || f[0] != "Fault bit 12" {
 		t.Errorf("unknown bit: %v", f)
 	}
 	v.FaultBits, v.FaultCodes = nil, map[string]string{"3": "Stuck"}
@@ -335,11 +339,15 @@ func TestEclipseCycle(t *testing.T) {
 		t.Fatalf("clean %+v", c)
 	}
 
-	// A status code not seen before counts as cleaning in a cleaning mode
-	if p := v.Phase(State{Status: "3", Mode: "wallfollow"}); p != "cleaning" {
+	// The other cleaning modes' statuses
+	if p, l := v.Phase(State{Status: "3"}), v.Label(State{Status: "3"}); p != "cleaning" || l != "Cleaning edges" {
+		t.Errorf("edge cleaning: %q / %q", p, l)
+	}
+	// A status code not in the thing model counts as cleaning in a cleaning mode
+	if p := v.Phase(State{Status: "9", Mode: "wallfollow"}); p != "cleaning" {
 		t.Errorf("unknown status in a cleaning mode: %q", p)
 	}
-	if p := v.Phase(State{Status: "6", Mode: "idle"}); p != "idle" {
+	if p := v.Phase(State{Status: "9", Mode: "idle"}); p != "idle" {
 		t.Errorf("unknown status while idle: %q", p)
 	}
 }
@@ -619,7 +627,7 @@ func TestDriveTimesOut(t *testing.T) {
 	vac.run("bob", "drive", "left")
 	vac.run("bob", "drive", "stop")
 	time.Sleep(200 * time.Millisecond)
-	if c := controls(); strings.Join(c[4:], ",") != "turn_left,stop" {
+	if c := controls(); strings.Join(c[4:], ",") != "turnleft,stop" {
 		t.Fatalf("sent %v", c)
 	}
 }

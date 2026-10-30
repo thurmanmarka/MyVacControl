@@ -120,21 +120,22 @@ var models = map[string]Vacuum{
 		StopMode: "idle",
 		Pause:    map[string]any{"26": "stop"},
 		Stop:     map[string]any{"26": "stop"},
-		// Status is a bare code "0".."8". These were seen on an iHRV2; 7 is
-		// what the Smart Life app's pause gives, 0 what stopping gives. The
-		// rest haven't been seen yet.
+		// Status is a bare code "0".."8", named in the thing model. 7 is what
+		// the Smart Life app's pause gives, and 0 (standby) what stopping
+		// gives on an iHRV2.
 		StatusLabels: map[string]string{
-			"0": "Stopped", "1": "Cleaning", "7": "Paused", "4": "Returning to dock", "5": "On dock, charging",
+			"0": "Stopped", "1": "Cleaning", "2": "Mopping", "3": "Cleaning edges", "4": "Returning to dock",
+			"5": "On dock, charging", "6": "Spot cleaning", "7": "Paused", "8": "Cleaning one room",
 		},
-		CleaningStatuses: []string{"1"},
+		CleaningStatuses: []string{"1", "2", "3", "6", "8"},
 		// A stopped clean can be resumed, so it stays open until it docks
 		PausedStatuses: []string{"7", "0"},
-		// Tuya's standard robot vacuum fault bitmap and direction values,
-		// which the AutoVac's thing model follows
+		// The fault bitmap and direction values from the thing model
 		FaultBits: []string{"Side brush stuck", "Main brush stuck", "Left wheel stuck", "Right wheel stuck",
-			"Dustbin missing", "Cliff sensor / lifted", "Bumper stuck"},
-		Directions: map[string]string{"forward": "forward", "backward": "backward", "left": "turn_left",
-			"right": "turn_right", "stop": "stop"},
+			"Dustbin missing", "Cliff sensor / lifted", "Bumper stuck", "Water tank missing",
+			"Boundary strip sensor fault", "Robot stuck"},
+		Directions: map[string]string{"forward": "forward", "backward": "backward", "left": "turnleft",
+			"right": "turnright", "stop": "stop"},
 	},
 	"nova": {
 		DPs:      DPMap{Power: 1, Start: 2, Mode: 3, Status: 5, Battery: 6, Locate: 13, Suction: 14, RawData: 102, Error: 110},
